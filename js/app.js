@@ -17,6 +17,8 @@ const App = (() => {
   };
 
   let current = 'dashboard';
+  let appWired = false;
+  let authMode = 'signin';
 
   function go(route) {
     if (!ROUTES[route]) route = 'dashboard';
@@ -45,10 +47,10 @@ const App = (() => {
 
     root.innerHTML = `
       <div class="grid cols-4">
-        ${statCard('Net Balance', fmt(balance), 'wallet', null)}
-        ${statCard('Income · This Month', fmt(cur.income), 'income', null)}
-        ${statCard('Spent · This Month', fmt(cur.expense), 'spend', expDiff, true)}
-        ${statCard('Projected Month-End', fmt(proj.projected), 'forecast', null, false, 'AI forecast')}
+        ${statCard('Net Balance', fmt(balance), 'wallet', null, false, null, 'balance')}
+        ${statCard('Income · This Month', fmt(cur.income), 'income', null, false, null, 'income')}
+        ${statCard('Spent · This Month', fmt(cur.expense), 'spend', expDiff, true, null, 'spent')}
+        ${statCard('Projected Month-End', fmt(proj.projected), 'forecast', null, false, 'AI forecast', 'projected')}
       </div>
 
       <div class="grid cols-3" style="margin-top:18px">
@@ -117,6 +119,46 @@ const App = (() => {
     });
     root.querySelectorAll('.coin-row').forEach(r => r.addEventListener('click', () => go('market')));
     root.querySelector('[data-goto="market"]').addEventListener('click', () => go('market'));
+    root.querySelectorAll('[data-stat]').forEach(el => el.addEventListener('click', () => openStatDetail(el.dataset.stat)));
+  }
+
+  /* ----- Stat detail modal (click a dashboard card) ----- */
+  function openStatDetail(type) {
+    const cur = AI.totalsForMonth(thisMonthKey());
+    const proj = AI.projectMonthEndSpend();
+    const balance = Store.transactions().reduce((s, t) => s + (t.type === 'income' ? t.amount : -t.amount), 0);
+    const isThisMonth = (t) => monthKey(t.date) === thisMonthKey();
+    let title, sumLabel, sumVal, list, note = '';
+    if (type === 'balance') {
+      title = 'Net Balance'; sumLabel = 'All-time net'; sumVal = balance; list = Store.transactions();
+    } else if (type === 'income') {
+      title = 'Income · This Month'; sumLabel = 'This month'; sumVal = cur.income;
+      list = Store.transactions().filter(t => t.type === 'income' && isThisMonth(t));
+    } else if (type === 'spent') {
+      title = 'Spent · This Month'; sumLabel = 'This month'; sumVal = cur.expense;
+      list = Store.transactions().filter(t => t.type === 'expense' && isThisMonth(t));
+    } else {
+      title = 'Projected Month-End'; sumLabel = 'Projected spend'; sumVal = proj.projected;
+      list = Store.transactions().filter(t => t.type === 'expense' && isThisMonth(t));
+      note = `Estimated from ${fmt(proj.dailyRate)}/day across ${proj.dayOfMonth} day${proj.dayOfMonth!==1?'s':''} so far. These are this month's expenses driving it.`;
+    }
+    document.getElementById('detailTitle').textContent = title;
+    const rows = list.slice(0, 200).map(t => {
+      const c = Store.cat(t.category);
+      const sign = t.type === 'income' ? '+' : '−';
+      const col = t.type === 'income' ? 'var(--up)' : 'var(--text)';
+      return `<div class="detail-row">
+        <div><div class="dr-desc">${esc(t.desc)}</div>
+          <div class="dr-sub"><span class="cat-dot" style="display:inline-block;background:${c.color};margin-right:6px"></span>${c.name} · ${new Date(t.date+'T00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div></div>
+        <div class="dr-amt" style="color:${col}">${sign}${fmt(t.amount)}</div>
+      </div>`;
+    }).join('');
+    document.getElementById('detailBody').innerHTML =
+      `<div class="detail-summary"><span class="ds-label">${sumLabel}</span><span class="ds-val">${fmt(sumVal)}</span></div>
+       ${note ? `<p style="font-size:12px;color:var(--muted);margin:11px 0 4px">${note}</p>` : ''}
+       ${list.length ? `<div class="detail-list">${rows}</div>`
+                      : `<div class="detail-empty">No transactions yet.<br>Add one with the “+ Add Expense” button.</div>`}`;
+    document.getElementById('detailModal').classList.add('open');
   }
 
   const STAT_ICONS = {
@@ -125,22 +167,23 @@ const App = (() => {
     spend: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/>',
     forecast: '<path d="M4 15l5-5 4 3 7-8" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 5h3v3" stroke-linecap="round" stroke-linejoin="round"/>',
   };
-  function statCard(label, value, iconKey, diff, isExpense, note) {
-    let chip = '';
+  function statCard(label, value, iconKey, diff, isExpense, note, statKey) {
+    let foot = '';
     if (diff !== null && diff !== undefined) {
       const up = diff >= 0;
       const good = isExpense ? !up : up;
-      chip = `<span class="chip ${diff===0?'flat':good?'up':'down'}">${up?'▲':'▼'} ${Math.abs(diff*100).toFixed(1)}%</span>`;
+      foot = `<span class="chip ${diff===0?'flat':good?'up':'down'}">${up?'▲':'▼'} ${Math.abs(diff*100).toFixed(1)}%</span><span>vs last month</span>`;
     } else if (note) {
-      chip = `<span class="tag">${note}</span>`;
+      foot = `<span class="tag">${note}</span>`;
     }
-    return `<div class="card stat">
+    return `<div class="card stat clickable" data-stat="${statKey}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <span class="stat-label">${label}</span>
         <span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor">${STAT_ICONS[iconKey]||''}</svg></span>
       </div>
       <div class="stat-value">${value}</div>
-      <div>${chip} <span style="font-size:12px;color:var(--muted)">vs last month</span></div>
+      <div class="stat-foot">${foot}</div>
+      <div class="stat-link">View details →</div>
     </div>`;
   }
 
@@ -249,8 +292,8 @@ const App = (() => {
   function renderBudget(root) {
     const cur = AI.totalsForMonth(thisMonthKey());
     const budgets = Store.budgets();
-    const cats = Store.CATEGORIES.filter(c => c.id !== 'income' && budgets[c.id] !== undefined);
-    const totalBudget = Object.values(budgets).reduce((a, b) => a + b, 0);
+    const cats = Store.CATEGORIES.filter(c => c.id !== 'income');
+    const totalBudget = Object.values(budgets).reduce((a, b) => a + (b || 0), 0);
     const totalSpent = cats.reduce((s, c) => s + (cur.byCat[c.id] || 0), 0);
 
     root.innerHTML = `
@@ -263,19 +306,20 @@ const App = (() => {
         <div class="card-head"><h3>Category Budgets</h3><span class="tag">tap a number to edit</span></div>
         <div id="budgetList">
         ${cats.map(c => {
+          const budget = budgets[c.id] || 0;
           const spent = cur.byCat[c.id] || 0;
-          const pct = Math.min(100, (spent / budgets[c.id]) * 100);
-          const over = spent > budgets[c.id];
+          const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+          const over = budget > 0 && spent > budget;
           const col = over ? 'var(--danger)' : pct > 80 ? 'var(--warn)' : c.color;
           return `<div class="budget-row">
             <div class="budget-top">
               <span><span class="cat-dot" style="background:${c.color};display:inline-block;margin-right:8px"></span>${c.name}</span>
               <span><b style="color:${over?'var(--danger)':'var(--text)'}">${fmt(spent)}</b> /
-                <input type="number" class="budget-input" data-cat="${c.id}" value="${budgets[c.id]}"
-                  style="width:90px;background:var(--bg-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:13px;text-align:right"></span>
+                <input type="number" min="0" class="budget-input" data-cat="${c.id}" value="${budget}"
+                  style="width:90px;background:var(--surface);border:1px solid var(--border-strong);color:var(--text);border-radius:8px;padding:4px 8px;font-size:13px;text-align:right"></span>
             </div>
             <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>
-            <div class="budget-meta" style="${over?'color:var(--down)':''}">${over ? `${fmt(spent-budgets[c.id])} over budget` : `${fmt(budgets[c.id]-spent)} left · ${pct.toFixed(0)}% used`}</div>
+            <div class="budget-meta" style="${over?'color:var(--down)':''}">${budget<=0 ? 'No budget set yet' : over ? `${fmt(spent-budget)} over budget` : `${fmt(budget-spent)} left · ${pct.toFixed(0)}% used`}</div>
           </div>`;
         }).join('')}
         </div>
@@ -473,9 +517,10 @@ const App = (() => {
   }
 
   /* ===================== ASSISTANT ===================== */
-  let chatHistory = [{ who: 'ai', text: AI.ask('hello').text }];
+  let chatHistory = null;
   let chatBusy = false;
   function renderAssistant(root) {
+    if (!chatHistory) chatHistory = [{ who: 'ai', text: AI.ask('hello').text }];
     const live = Api.isAiEnabled();
     root.innerHTML = `
       <div class="card">
@@ -571,43 +616,61 @@ const App = (() => {
   /* ===================== SETTINGS ===================== */
   function renderSettings(root) {
     const u = Store.user();
+    const acc = Auth.current();
+    const initial = ((u.name && u.name[0]) || (acc && acc.email && acc.email[0]) || 'U').toUpperCase();
     root.innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-head"><h3>Account</h3></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+          <div style="display:flex;align-items:center;gap:13px">
+            <div class="avatar" style="width:44px;height:44px;font-size:16px">${initial}</div>
+            <div>
+              <div style="font-weight:600">${u.name ? esc(u.name) : 'No display name set'}</div>
+              <div style="font-size:13px;color:var(--muted)">${acc ? esc(acc.email) : 'Local account'}${acc && acc.provider === 'google' ? ' · Google' : ''}</div>
+            </div>
+          </div>
+          <button class="btn btn-ghost" id="signOutBtn">Sign out</button>
+        </div>
+      </div>
       <div class="grid cols-2">
         <div class="card">
           <div class="card-head"><h3>Profile & Goals</h3></div>
-          <div class="form-row" style="margin-bottom:14px"><label>Display name</label><input class="input" id="setName" value="${u.name}"></div>
+          <div class="form-row" style="margin-bottom:14px"><label>Display name</label><input class="input" id="setName" value="${esc(u.name)}" placeholder="Your name"></div>
           <div class="form-grid">
             <div class="form-row"><label>Currency symbol</label><input class="input" id="setCur" value="${u.currency}" maxlength="3"></div>
-            <div class="form-row"><label>Monthly income goal</label><input class="input" type="number" id="setIncome" value="${u.monthlyIncomeGoal}"></div>
+            <div class="form-row"><label>Monthly income goal</label><input class="input" type="number" id="setIncome" value="${u.monthlyIncomeGoal}" placeholder="0"></div>
           </div>
-          <div class="form-row" style="margin-top:14px"><label>Savings goal</label><input class="input" type="number" id="setSavings" value="${u.savingsGoal}"></div>
+          <div class="form-row" style="margin-top:14px"><label>Savings goal</label><input class="input" type="number" id="setSavings" value="${u.savingsGoal}" placeholder="0"></div>
           <button class="btn btn-primary" id="saveSettings" style="margin-top:18px">Save changes</button>
         </div>
         <div class="card">
           <div class="card-head"><h3>Data</h3></div>
-          <p style="color:var(--muted);font-size:13.5px;line-height:1.6;margin-bottom:16px">All your data lives locally in this browser. Export it as a backup, or reset to fresh sample data.</p>
+          <p style="color:var(--muted);font-size:13.5px;line-height:1.6;margin-bottom:16px">All your data lives privately on this device. Export it as a backup, or clear everything to start fresh.</p>
           <div style="display:flex;flex-direction:column;gap:10px">
             <button class="btn btn-ghost" id="exportBtn">Export data (JSON)</button>
             <label class="btn btn-ghost" style="text-align:center;cursor:pointer">Import data<input type="file" id="importFile" accept="application/json" hidden></label>
-            <button class="btn btn-danger" id="resetBtn">Reset to sample data</button>
+            <button class="btn btn-danger" id="resetBtn">Clear all my data</button>
           </div>
           <div class="card" style="margin-top:18px;background:var(--bg-2)">
             <div class="stat-label">About VrveFi</div>
             <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:8px">
-              An AI-powered personal finance workspace. Expense tracking, budgeting, market intelligence and a data-grounded assistant — all running on-device with zero backend.
+              An AI-powered personal finance workspace. Expense tracking, budgeting, savings goals, live markets and a data-grounded assistant — all running on-device.
             </p>
           </div>
         </div>
       </div>
     `;
+    root.querySelector('#signOutBtn').addEventListener('click', () => { if (confirm('Sign out of VrveFi?')) doSignOut(); });
     root.querySelector('#saveSettings').addEventListener('click', () => {
+      const name = root.querySelector('#setName').value.trim();
       Store.setUser({
-        name: root.querySelector('#setName').value || 'You',
+        name,
         currency: root.querySelector('#setCur').value || '$',
         monthlyIncomeGoal: +root.querySelector('#setIncome').value || 0,
         savingsGoal: +root.querySelector('#setSavings').value || 0,
       });
-      document.getElementById('userAvatar').textContent = (Store.user().name[0]||'U').toUpperCase();
+      if (Auth.current()) Auth.updateName(name);
+      init();
       toast('Settings saved'); go('settings'); updateHealth();
     });
     root.querySelector('#exportBtn').addEventListener('click', () => {
@@ -622,7 +685,7 @@ const App = (() => {
       r.readAsText(f);
     });
     root.querySelector('#resetBtn').addEventListener('click', () => {
-      if (confirm('Reset all data to fresh sample data? This cannot be undone.')) { Store.reset(); toast('Reset complete'); init(); go('dashboard'); }
+      if (confirm('Clear all your transactions, budgets and goals? This cannot be undone.')) { Store.reset(); toast('All data cleared'); init(); go('dashboard'); }
     });
   }
 
@@ -712,7 +775,9 @@ const App = (() => {
   }
 
   function init() {
-    document.getElementById('userAvatar').textContent = (Store.user().name[0] || 'U').toUpperCase();
+    const u = Store.user(), acc = Auth.current();
+    const ch = (u.name && u.name[0]) || (acc && acc.email && acc.email[0]) || 'U';
+    document.getElementById('userAvatar').textContent = ch.toUpperCase();
     updateHealth(); updateTicker();
   }
 
@@ -729,17 +794,87 @@ const App = (() => {
     else if (src === 'partial') toast('Live data loaded (some assets simulated)');
   }
 
-  function start() {
-    document.querySelectorAll('.nav-item').forEach(n => n.addEventListener('click', () => go(n.dataset.route)));
-    document.getElementById('quickAdd').addEventListener('click', () => openModal());
-    document.getElementById('menuToggle').addEventListener('click', () => document.querySelector('.sidebar').classList.toggle('open'));
-    initModal();
+  /* ===================== AUTH GATE ===================== */
+  function initDetailModal() {
+    const dm = document.getElementById('detailModal');
+    document.getElementById('detailClose').addEventListener('click', () => dm.classList.remove('open'));
+    dm.addEventListener('click', e => { if (e.target === dm) dm.classList.remove('open'); });
+  }
+
+  function wireAuth() {
+    const tabs = document.querySelectorAll('.auth-tab');
+    tabs.forEach(t => t.addEventListener('click', () => {
+      authMode = t.dataset.tab;
+      tabs.forEach(x => x.classList.toggle('active', x === t));
+      document.querySelector('.signup-only').style.display = authMode === 'signup' ? '' : 'none';
+      document.getElementById('authSubmit').textContent = authMode === 'signup' ? 'Create account' : 'Sign in';
+      document.getElementById('authPassword').setAttribute('autocomplete', authMode === 'signup' ? 'new-password' : 'current-password');
+      document.getElementById('authError').textContent = '';
+    }));
+    document.getElementById('authForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('authEmail').value;
+      const pass = document.getElementById('authPassword').value;
+      const name = document.getElementById('authName').value;
+      const err = document.getElementById('authError'); err.textContent = '';
+      try {
+        const acc = authMode === 'signup' ? await Auth.signUp(email, name, pass) : await Auth.signIn(email, pass);
+        enterApp(acc);
+      } catch (ex) { err.textContent = ex.message; }
+    });
+  }
+
+  function initGoogle() {
+    const wrap = document.getElementById('googleBtn');
+    const cid = window.VRVEFI_GOOGLE_CLIENT_ID;
+    if (!cid) { wrap.style.display = 'none'; document.querySelector('.auth-divider').style.display = 'none'; return; }
+    const render = () => {
+      if (!(window.google && google.accounts && google.accounts.id)) { setTimeout(render, 250); return; }
+      google.accounts.id.initialize({
+        client_id: cid,
+        callback: (resp) => {
+          try { enterApp(Auth.signInWithGoogle(resp.credential)); }
+          catch (ex) { document.getElementById('authError').textContent = ex.message; }
+        },
+      });
+      google.accounts.id.renderButton(wrap, { theme: 'outline', size: 'large', width: 320, text: 'continue_with' });
+    };
+    render();
+  }
+
+  function showAuth() {
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('authScreen').style.display = 'grid';
+    initGoogle();
+  }
+
+  function doSignOut() { Auth.signOut(); location.reload(); }
+
+  function enterApp(acc) {
+    document.getElementById('authScreen').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    Store.init(acc.id || acc.email);
+    if (!Store.user().name && acc.name) Store.setUser({ name: acc.name });
+    if (!appWired) {
+      document.querySelectorAll('.nav-item').forEach(n => n.addEventListener('click', () => go(n.dataset.route)));
+      document.getElementById('quickAdd').addEventListener('click', () => openModal());
+      document.getElementById('menuToggle').addEventListener('click', () => document.querySelector('.sidebar').classList.toggle('open'));
+      initModal();
+      appWired = true;
+    }
     init();
     go('dashboard');
     bootstrap();
   }
 
-  return { start, go, toast };
+  function start() {
+    initDetailModal();
+    wireAuth();
+    const acc = Auth.current();
+    if (acc) enterApp(acc); else showAuth();
+  }
+
+  return { start, go, toast, signOut: doSignOut };
 })();
 
 document.addEventListener('DOMContentLoaded', App.start);

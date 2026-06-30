@@ -2,10 +2,11 @@
    Strategy:
    - /api/*  → network-first (live data), no offline cache of stale prices
    - shell   → cache-first, updated in background (stale-while-revalidate) */
-const VERSION = 'vrvefi-v3';
+const VERSION = 'vrvefi-v4';
 const SHELL = [
   './', './index.html',
   './css/styles.css',
+  './js/auth-config.js', './js/auth.js',
   './js/data.js', './js/api.js', './js/charts.js',
   './js/market.js', './js/ai.js', './js/app.js',
   './manifest.webmanifest',

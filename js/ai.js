@@ -49,6 +49,8 @@ const AI = (() => {
 
   /* ---------- Health score (0-100) ---------- */
   function healthScore() {
+    // Fresh account with no data yet → neutral zero state.
+    if (!Store.transactions().length) return { score: 0, label: 'No data yet', savingsRate: 0, avgIncome: 0 };
     const cur = totalsForMonth(thisMonthKey());
     const series = monthlySeries(4);
     const incomes = series.map(s => s.income).filter(v => v > 0);
@@ -99,6 +101,11 @@ const AI = (() => {
   /* ---------- Natural-language insights ---------- */
   function insights() {
     const out = [];
+    if (!Store.transactions().length) {
+      return [{ icon: '', tone: 'neutral', tag: 'Get started',
+        title: 'Add your first transaction',
+        body: 'Tap “+ Add Expense” to log income or spending. As you add data, VrveFi will surface trends, budget alerts and savings tips here automatically.' }];
+    }
     const cur = totalsForMonth(thisMonthKey());
     const prev = totalsForMonth(lastMonthKey());
     const proj = projectMonthEndSpend();
@@ -260,7 +267,7 @@ const AI = (() => {
     }
 
     if (has('hi', 'hello', 'hey', 'help', 'what can you')) {
-      return { text: `Hi Goldy — I'm your VrveFi AI. I can:\n- Analyze where your money goes\n- Forecast month-end spending\n- Predict market moves on your watchlist\n- Suggest savings & flag unusual charges\n\nTry: *"How much did I spend on dining?"* or *"Predict BTC"*.` };
+      return { text: `Hi${Store.user().name ? ' ' + Store.user().name.split(' ')[0] : ''} — I'm your VrveFi AI. I can:\n- Analyze where your money goes\n- Forecast month-end spending\n- Track live stock prices on your watchlist\n- Suggest savings & flag unusual charges\n\nTry: *"How much did I spend on dining?"* or *"How is NVDA doing?"*.` };
     }
 
     // Fallback: data-grounded summary
