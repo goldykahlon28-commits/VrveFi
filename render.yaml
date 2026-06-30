@@ -1,0 +1,13 @@
+# Render.com blueprint — deploys VrveFi as a free web service.
+# Push the CONTENTS of this VrveFi folder as a GitHub repo root, then on
+# Render: New → Blueprint → pick the repo. Render reads this file automatically.
+services:
+  - type: web
+    name: vrvefi
+    runtime: node
+    plan: free
+    buildCommand: ""          # no dependencies to install
+    startCommand: node server.js
+    envVars:
+      - key: ANTHROPIC_API_KEY # optional — only needed to enable the live AI assistant
+        sync: false            # set this value in the Render dashboard, never in git
